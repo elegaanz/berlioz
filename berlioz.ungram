@@ -1,0 +1,19 @@
+// This file should not be read as a grammar, but rather as "what properties/children
+// a given node can have?"
+
+Root = Binding*
+Binding = 'identifier'* Expression*
+Expression = AnyExpr
+
+AnyExpr =
+  Mul |
+  Sum |
+  Call |
+  Constant
+
+Mul = Expression*
+Sum = Expression*
+Call = 'identifier' Terminal*
+Constant = 'number'* 'slash'? 'identifier'?
+
+Terminal = Call | Constant
