@@ -333,6 +333,7 @@ impl Generator {
                             }
                             writeln!(self.out, "    }}").ok();
                         }
+                        // TODO: isn't this the same as optional fields?
                         let mut type_counter = HashMap::new();
                         for (unique_field, ty, is_token) in struc.unique_fields {
                             let type_count = type_counter.entry(ty.clone()).or_insert(0);

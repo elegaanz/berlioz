@@ -3,9 +3,9 @@
 
 Root = Binding*
 Binding = 'identifier'* Expression*
-Expression = AnyExpr
+Expression = kind:ExprKind
 
-AnyExpr =
+ExprKind =
   Mul |
   Sum |
   Call |
@@ -14,6 +14,6 @@ AnyExpr =
 Mul = Expression*
 Sum = Expression*
 Call = 'identifier' Terminal*
-Constant = 'number'* 'slash'? 'identifier'?
+Constant = 'number'* 'slash'? unit:'identifier'? 'str'?
 
 Terminal = Call | Constant

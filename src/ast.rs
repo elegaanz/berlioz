@@ -58,10 +58,24 @@ pub trait AstToken {
     }
 }
 
+fn debug_ast_node_and_children(indent: usize, node: &SyntaxNode, name: &str) -> String {
+    format!(
+        "{}{}@{:?}\n{}",
+        "  ".repeat(indent),
+        name,
+        node.text_range(),
+        node.children()
+            .map(|ch| debug_ast_node_and_children(indent + 1, &ch, &format!("{:?}", ch.kind())))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
+}
+
 fn debug_ast_node<N: AstNode>(
     node: &N,
     f: &mut std::fmt::Formatter<'_>,
     name: &str,
 ) -> std::fmt::Result {
-    write!(f, "{}@{:?}", name, node.syntax().text_range())
+    // write!(f, "{}@{:?}", name, node.syntax().text_range())
+    write!(f, "{}", debug_ast_node_and_children(0, node.syntax(), name))
 }
