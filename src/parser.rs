@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use enum_ordinalize::Ordinalize;
 use rowan_nom::{
-    alt, expect, fallible, fold_many1, join, many0, node, opt, peek, t, t_any, t_raw, DummyError,
+    alt, expect, fallible, fold_many1, join, many0, node, opt, t, t_any, t_raw, DummyError,
     RowanNomError,
 };
 
@@ -233,9 +233,7 @@ fn call<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
                     t(Identifier),
                     fallible(alt((
                         many_delimited(t(LPar), expression, t(Comma), t(RPar)),
-                        block,
-                        t_raw(LineBreak),
-                        alt((peek(t(RPar)), peek(t(Comma)))),
+                        block_only,
                     ))),
                 )),
             ),
@@ -266,17 +264,18 @@ fn mul<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
     )(input)
 }
 
-fn block<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
-    alt((
+fn block_only<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
+    node(
+        Expression,
         node(
-            Expression,
-            node(
-                Sequence,
-                many_delimited(t(Indent), expression, t_raw(LineBreak), t(Dedent)),
-            ),
+            Sequence,
+            many_delimited(t(Indent), expression, t_raw(LineBreak), t(Dedent)),
         ),
-        mul,
-    ))(input)
+    )(input)
+}
+
+fn block<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
+    alt((block_only, mul))(input)
 }
 
 fn expression<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {

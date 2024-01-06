@@ -4,7 +4,7 @@ use std::{
     ops::{Add, Div, Mul as MulOp, Sub},
 };
 
-use comemo::{Tracked, TrackedMut};
+use comemo::{Track, Tracked, TrackedMut};
 
 use crate::{
     ast::*,
@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy)]
-pub struct Value(f64);
+pub struct Value(pub f64);
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -61,7 +61,7 @@ impl Env {
     pub fn empty() -> Self {
         Self {
             bindings: HashMap::new(),
-            rate: 48_000,
+            rate: 24_000,
             tempo: 120,
         }
     }
@@ -75,19 +75,6 @@ impl Env {
 
     fn bind(&mut self, name: String, value: Value) {
         self.bindings.insert(name, value);
-    }
-
-    fn state(&self) -> Vec<String> {
-        self.bindings.keys().cloned().collect()
-    }
-
-    fn restore(&mut self, state: Vec<String>) {
-        let keys: Vec<_> = self.bindings.keys().cloned().collect();
-        for k in keys {
-            if !state.contains(&k) {
-                self.bindings.remove(&k);
-            }
-        }
     }
 
     fn rate(&self) -> u64 {
@@ -114,25 +101,24 @@ impl Stream for Call {
                 .all_expression()
                 .next()
                 .log_err("No expression in binding")?;
-            let prev_env = env.state();
             // TODO: check arity
             let eval_params: Vec<_> = params
                 .map(|p| p.eval(TrackedMut::reborrow_mut(&mut env), source, time))
                 .collect();
+            let mut func_env = Env::empty();
             for (arg, val) in binding
                 .all_identifier()
                 .skip(1)
                 .zip(eval_params.into_iter())
             {
-                env.bind(
+                func_env.bind(
                     arg.text().to_owned(),
                     val.log_err("Argument could not be evaluated")?,
                 );
             }
             let res = expr
-                .eval(TrackedMut::reborrow_mut(&mut env), source, time)
+                .eval(func_env.track_mut(), source, time)
                 .log_err(format!("Function call ({}) returned None", name));
-            env.restore(prev_env);
             res
         } else if let Some(expr) = env.resolve(name) {
             Some(expr)
@@ -152,7 +138,9 @@ impl Stream for Call {
                         .eval(TrackedMut::reborrow_mut(&mut env), source, time)
                         .log_err("sin frequency is None")?
                         .0;
-                    Some(Value(((time as f64) * freq / env.rate() as f64).sin()))
+                    Some(Value(
+                        (std::f64::consts::PI * 2.0 * time as f64 * freq).sin(),
+                    ))
                 }
                 "loop" => {
                     let param = params.next();
@@ -265,7 +253,7 @@ impl Stream for Mul {
         let eval_right = right.eval(env, source, time);
         match (eval_left, eval_right) {
             (Some(l), Some(r)) => Some(l * r),
-            (Some(_), None) | (None, Some(_)) => Some(Value(0.0)),
+            (Some(_), None) | (None, Some(_)) => None,
             (None, None) => {
                 println!("End of product");
                 None
@@ -298,9 +286,9 @@ trait LogErr {
 }
 
 impl<T> LogErr for Option<T> {
-    fn log_err<D: std::fmt::Display>(self, err: D) -> Self {
+    fn log_err<D: std::fmt::Display>(self, _err: D) -> Self {
         if self.is_none() {
-            println!("{}", err);
+            // println!("{}", err);
         }
         self
     }
@@ -352,7 +340,10 @@ impl Stream for Sequence {
             );
 
             if time <= dur {
-                return expr.eval(env, source, time).log_err("Sequence is done");
+                match expr.eval(TrackedMut::reborrow_mut(&mut env), source, time) {
+                    Some(x) => return Some(x),
+                    None => time -= dur,
+                }
             } else {
                 time -= dur;
             }
@@ -361,6 +352,7 @@ impl Stream for Sequence {
     }
 }
 
+#[comemo::memoize]
 fn duration(
     mut max: u64,
     expr: Expression,

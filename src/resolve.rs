@@ -18,8 +18,20 @@ pub fn resolve(name: &str, source: Tracked<Source>) -> Option<crate::ast::Bindin
 impl Source {
     pub fn new(src: String) -> Self {
         let tokens = crate::lexer::lex(&src);
+        println!(
+            "{}",
+            tokens
+                .iter()
+                .map(|x| format!("{:?} {:?}", x.0, x.1))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
         let input = rowan_nom::Input::from(&tokens[..]);
-        let (root, _errors) = crate::parser::root(input);
+        let (root, errors) = crate::parser::root(input);
+
+        for err in errors {
+            dbg!(err);
+        }
 
         Self {
             src,
