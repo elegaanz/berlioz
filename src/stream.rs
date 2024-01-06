@@ -4,7 +4,7 @@ use std::{
     ops::{Add, Div, Mul as MulOp, Sub},
 };
 
-use comemo::{Track, Tracked, TrackedMut};
+use comemo::{Track, Tracked};
 
 use crate::{
     ast::*,
@@ -87,12 +87,12 @@ impl Env {
 }
 
 pub trait Stream {
-    fn eval(&self, env: TrackedMut<Env>, source: Tracked<Source>, time: u64) -> Option<Value>;
+    fn eval(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<Value>;
 }
 
 impl Stream for Call {
     #[comemo::memoize]
-    fn eval(&self, mut env: TrackedMut<Env>, source: Tracked<Source>, time: u64) -> Option<Value> {
+    fn eval(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<Value> {
         let ident = self.identifier().log_err("Function call has no name")?;
         let mut params = self.all_expression();
         let name = ident.text();
@@ -102,9 +102,7 @@ impl Stream for Call {
                 .next()
                 .log_err("No expression in binding")?;
             // TODO: check arity
-            let eval_params: Vec<_> = params
-                .map(|p| p.eval(TrackedMut::reborrow_mut(&mut env), source, time))
-                .collect();
+            let eval_params: Vec<_> = params.map(|p| p.eval(env, source, time)).collect();
             let mut func_env = Env::empty();
             for (arg, val) in binding
                 .all_identifier()
@@ -117,7 +115,7 @@ impl Stream for Call {
                 );
             }
             let res = expr
-                .eval(func_env.track_mut(), source, time)
+                .eval(func_env.track(), source, time)
                 .log_err(format!("Function call ({}) returned None", name));
             res
         } else if let Some(expr) = env.resolve(name) {
@@ -135,7 +133,7 @@ impl Stream for Call {
                     }
                     let freq = freq
                         .unwrap()
-                        .eval(TrackedMut::reborrow_mut(&mut env), source, time)
+                        .eval(env, source, time)
                         .log_err("sin frequency is None")?
                         .0;
                     Some(Value(
@@ -152,12 +150,7 @@ impl Stream for Call {
                     if params.next().is_some() {
                         println!("Loop takes only one paramter, the second one will be ignored");
                     }
-                    let one_duration = duration(
-                        time,
-                        param.clone(),
-                        TrackedMut::reborrow_mut(&mut env),
-                        source,
-                    );
+                    let one_duration = duration(time, param.clone(), env, source);
                     let time = if one_duration == 0 {
                         0
                     } else if time > one_duration {
@@ -174,37 +167,37 @@ impl Stream for Call {
                         params
                             .next()
                             .log_err("linear_adsr: expected attack_duration")?
-                            .eval(TrackedMut::reborrow_mut(&mut env), source, time)
+                            .eval(env, source, time)
                             .unwrap_or(one_sec),
                         params
                             .next()
                             .log_err("linear_adsr: expected attack_value")?
-                            .eval(TrackedMut::reborrow_mut(&mut env), source, time)
+                            .eval(env, source, time)
                             .unwrap_or(hundred_percent),
                         params
                             .next()
                             .log_err("linear_adsr: expected delay_duration")?
-                            .eval(TrackedMut::reborrow_mut(&mut env), source, time)
+                            .eval(env, source, time)
                             .unwrap_or(one_sec),
                         params
                             .next()
                             .log_err("linear_adsr: expected delay_value")?
-                            .eval(TrackedMut::reborrow_mut(&mut env), source, time)
+                            .eval(env, source, time)
                             .unwrap_or(hundred_percent),
                         params
                             .next()
                             .log_err("linear_adsr: expected sustain_duration")?
-                            .eval(TrackedMut::reborrow_mut(&mut env), source, time)
+                            .eval(env, source, time)
                             .unwrap_or(one_sec),
                         params
                             .next()
                             .log_err("linear_adsr: expected sustain_value")?
-                            .eval(TrackedMut::reborrow_mut(&mut env), source, time)
+                            .eval(env, source, time)
                             .unwrap_or(hundred_percent),
                         params
                             .next()
                             .log_err("linear_adsr: expected release_duration")?
-                            .eval(TrackedMut::reborrow_mut(&mut env), source, time)
+                            .eval(env, source, time)
                             .unwrap_or(one_sec),
                     ];
                     let durations = &[params[0], params[2], params[4], params[6]];
@@ -232,7 +225,7 @@ impl Stream for Call {
 
 impl Stream for Expression {
     #[comemo::memoize]
-    fn eval(&self, env: TrackedMut<Env>, source: Tracked<Source>, time: u64) -> Option<Value> {
+    fn eval(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<Value> {
         match self.kind()? {
             ExprKind::Mul(m) => m.eval(env, source, time).log_err("err: expr: mul"),
             ExprKind::Sum(s) => s.eval(env, source, time).log_err("err: expr: sum"),
@@ -245,11 +238,11 @@ impl Stream for Expression {
 
 impl Stream for Mul {
     #[comemo::memoize]
-    fn eval(&self, mut env: TrackedMut<Env>, source: Tracked<Source>, time: u64) -> Option<Value> {
+    fn eval(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<Value> {
         let mut exprs = self.all_expression();
         let left = exprs.next()?;
         let right = exprs.next()?;
-        let eval_left = left.eval(TrackedMut::reborrow_mut(&mut env), source, time);
+        let eval_left = left.eval(env, source, time);
         let eval_right = right.eval(env, source, time);
         match (eval_left, eval_right) {
             (Some(l), Some(r)) => Some(l * r),
@@ -264,11 +257,11 @@ impl Stream for Mul {
 
 impl Stream for Sum {
     #[comemo::memoize]
-    fn eval(&self, mut env: TrackedMut<Env>, source: Tracked<Source>, time: u64) -> Option<Value> {
+    fn eval(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<Value> {
         let mut exprs = self.all_expression();
         let left = exprs.next()?;
         let right = exprs.next()?;
-        let eval_left = left.eval(TrackedMut::reborrow_mut(&mut env), source, time);
+        let eval_left = left.eval(env, source, time);
         let eval_right = right.eval(env, source, time);
         match (eval_left, eval_right) {
             (Some(l), Some(r)) => Some(l + r),
@@ -296,7 +289,7 @@ impl<T> LogErr for Option<T> {
 
 impl Stream for Constant {
     #[comemo::memoize]
-    fn eval(&self, env: TrackedMut<Env>, _source: Tracked<Source>, _time: u64) -> Option<Value> {
+    fn eval(&self, env: Tracked<Env>, _source: Tracked<Source>, _time: u64) -> Option<Value> {
         let mut numbers = self.all_number();
         let num = numbers
             .next()
@@ -325,22 +318,12 @@ impl Stream for Constant {
 
 impl Stream for Sequence {
     #[comemo::memoize]
-    fn eval(
-        &self,
-        mut env: TrackedMut<Env>,
-        source: Tracked<Source>,
-        mut time: u64,
-    ) -> Option<Value> {
+    fn eval(&self, env: Tracked<Env>, source: Tracked<Source>, mut time: u64) -> Option<Value> {
         for expr in self.all_expression() {
-            let dur = duration(
-                time,
-                expr.clone(),
-                TrackedMut::reborrow_mut(&mut env),
-                source,
-            );
+            let dur = duration(time, expr.clone(), env, source);
 
             if time <= dur {
-                match expr.eval(TrackedMut::reborrow_mut(&mut env), source, time) {
+                match expr.eval(env, source, time) {
                     Some(x) => return Some(x),
                     None => time -= dur,
                 }
@@ -353,19 +336,11 @@ impl Stream for Sequence {
 }
 
 #[comemo::memoize]
-fn duration(
-    mut max: u64,
-    expr: Expression,
-    mut env: TrackedMut<Env>,
-    source: Tracked<Source>,
-) -> u64 {
+fn duration(mut max: u64, expr: Expression, env: Tracked<Env>, source: Tracked<Source>) -> u64 {
     let mut min = 0u64;
     loop {
         let half = min + ((max - min) / 2);
-        if expr
-            .eval(TrackedMut::reborrow_mut(&mut env), source, half)
-            .is_none()
-        {
+        if expr.eval(env, source, half).is_none() {
             max = half;
         } else {
             min = half;

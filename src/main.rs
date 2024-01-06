@@ -65,10 +65,10 @@ fn main() {
         Some(main) => {
             dbg!(&main);
             let expr = main.all_expression().next().unwrap();
-            let mut env = Env::empty();
+            let env = Env::empty();
             let mut time = 0;
             loop {
-                match expr.eval(env.track_mut(), source.track(), time) {
+                match expr.eval(env.track(), source.track(), time) {
                     Some(v) => {
                         // dbg!(v.0);
                         if tx.try_send(v.0).is_err() {
