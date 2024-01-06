@@ -31,7 +31,7 @@ pub enum SyntaxKind {
     #[token(";")]
     Semicolon,
 
-    #[regex("\\d+(.\\d+)?")]
+    #[regex("\\d+(\\.\\d+)?")]
     Number,
 
     #[token("/")]

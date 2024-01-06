@@ -21,8 +21,6 @@ impl Source {
         let input = rowan_nom::Input::from(&tokens[..]);
         let (root, _errors) = crate::parser::root(input);
 
-        dbg!(&root);
-
         Self {
             src,
             root: crate::ast::Root { syntax: root },

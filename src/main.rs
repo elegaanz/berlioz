@@ -18,10 +18,13 @@ fn main() {
     let main = resolve::resolve("main", source.track());
     match main {
         Some(main) => {
-            dbg!(&main);
+            // dbg!(&main);
             let expr = main.all_expression().next().unwrap();
-            let env = Env::empty();
-            dbg!(expr.eval(env.track(), source.track(), time));
+            let mut env = Env::empty();
+            match expr.eval(env.track_mut(), source.track(), time) {
+                Some(v) => println!("{}", v),
+                None => println!("End"),
+            }
         }
         None => println!("Error: please provide a main node"),
     }
