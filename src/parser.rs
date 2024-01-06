@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use enum_ordinalize::Ordinalize;
 use rowan_nom::{
-    alt, expect, fallible, fold_many1, join, many0, node, opt, t, t_any, t_raw, DummyError,
+    alt, expect, fallible, fold_many1, join, many0, node, opt, peek, t, t_any, t_raw, DummyError,
     RowanNomError,
 };
 
@@ -201,44 +201,51 @@ fn parse_expression_left<'slice, 'src: 'slice>(
                 };
                 Ok((input, (a + b, n)))
             },
-            |a, (b, n)| (a + b).into_node(n),
+            |a, (b, n)| (a + b).into_node(n).into_node(Expression),
         )(input)
     }
 }
 
 fn constant<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
     node(
-        Constant,
-        alt((
-            join((
-                t(Number),
-                opt(join((t(Slash), t(Number)))),
-                opt(t(Identifier)),
+        Expression,
+        node(
+            Constant,
+            alt((
+                join((
+                    t(Number),
+                    opt(join((t(Slash), t(Number)))),
+                    opt(t(Identifier)),
+                )),
+                t(Str),
             )),
-            t(Str),
-        )),
+        ),
     )(input)
 }
 
 fn call<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
     alt((
         node(
-            Call,
-            join((
-                t(Identifier),
-                fallible(alt((
-                    many_delimited(t(LPar), node(Parameter, terminal), t(Comma), t(RPar)),
-                    block,
-                    t_raw(LineBreak),
-                ))),
-            )),
+            Expression,
+            node(
+                Call,
+                join((
+                    t(Identifier),
+                    fallible(alt((
+                        many_delimited(t(LPar), expression, t(Comma), t(RPar)),
+                        block,
+                        t_raw(LineBreak),
+                        alt((peek(t(RPar)), peek(t(Comma)))),
+                    ))),
+                )),
+            ),
         ),
         terminal,
     ))(input)
 }
 
 fn terminal<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
-    alt((t(Identifier), constant))(input) // TODO: parenth expr
+    alt((join((t(LPar), expression, t(RPar))), constant))(input)
 }
 
 fn add<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
@@ -262,15 +269,18 @@ fn mul<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
 fn block<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
     alt((
         node(
-            Sequence,
-            many_delimited(t(Indent), expression, t_raw(LineBreak), t(Dedent)),
+            Expression,
+            node(
+                Sequence,
+                many_delimited(t(Indent), expression, t_raw(LineBreak), t(Dedent)),
+            ),
         ),
         mul,
     ))(input)
 }
 
 fn expression<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {
-    fallible(node(Expression, block))(input)
+    fallible(block)(input)
 }
 
 fn binding<'slice, 'src>(input: Input<'slice, 'src>) -> IResult<'slice, 'src> {

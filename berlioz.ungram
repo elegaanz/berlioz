@@ -9,11 +9,14 @@ ExprKind =
   Mul |
   Sum |
   Call |
-  Constant
+  Constant |
+  Sequence
 
 Mul = Expression*
 Sum = Expression*
-Call = 'identifier' Terminal*
+Call = 'identifier' Expression*
+
+Sequence = Expression*
 Constant = 'number'* 'slash'? unit:'identifier'? 'str'?
 
 Terminal = Call | Constant

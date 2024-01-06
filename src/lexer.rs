@@ -52,7 +52,6 @@ pub enum SyntaxKind {
     Sum,
     Mul,
     Call,
-    Parameter,
     Sequence,
     Expression,
     Binding,
