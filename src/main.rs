@@ -14,7 +14,7 @@ fn main() {
     let source = resolve::Source::new(source);
     let main = resolve::resolve("main", source.track());
 
-    let (tx, rx) = std::sync::mpsc::sync_channel(24_000 * 5);
+    let (tx, rx) = std::sync::mpsc::channel();
 
     let host = cpal::default_host();
     let device = host
@@ -27,7 +27,7 @@ fn main() {
         .next()
         .expect("no supported config?!");
 
-    let config = config_range.with_sample_rate(cpal::SampleRate(24_000));
+    let config = config_range.with_sample_rate(cpal::SampleRate(12_000));
 
     match main {
         Some(main) => {
@@ -39,7 +39,7 @@ fn main() {
                 match expr.eval(env.track(), source.track(), time) {
                     Some(v) => {
                         // dbg!(v.0);
-                        if tx.try_send(v.0).is_err() {
+                        if tx.send(v.0).is_err() {
                             break;
                         }
                         time += 1;

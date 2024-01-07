@@ -61,7 +61,7 @@ impl Env {
     pub fn empty() -> Self {
         Self {
             bindings: HashMap::new(),
-            rate: 24_000,
+            rate: 12_000,
             tempo: 120,
         }
     }
@@ -88,6 +88,7 @@ impl Env {
 
 pub trait Stream {
     fn eval(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<Value>;
+    fn duration(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<u64>;
 }
 
 impl Stream for Call {
@@ -114,10 +115,8 @@ impl Stream for Call {
                     val.log_err("Argument could not be evaluated")?,
                 );
             }
-            let res = expr
-                .eval(func_env.track(), source, time)
-                .log_err(format!("Function call ({}) returned None", name));
-            res
+            expr.eval(func_env.track(), source, time)
+                .log_err(format!("Function call ({}) returned None", name))
         } else if let Some(expr) = env.resolve(name) {
             Some(expr)
         } else {
@@ -150,7 +149,7 @@ impl Stream for Call {
                     if params.next().is_some() {
                         println!("Loop takes only one paramter, the second one will be ignored");
                     }
-                    let one_duration = duration(time, param.clone(), env, source);
+                    let one_duration = param.duration(env, source, time)?;
                     let time = if one_duration == 0 {
                         0
                     } else if time > one_duration {
@@ -221,6 +220,86 @@ impl Stream for Call {
             }
         }
     }
+
+    #[comemo::memoize]
+    fn duration(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<u64> {
+        let ident = self.identifier().log_err("Function call has no name")?;
+        let mut params = self.all_expression();
+        let name = ident.text();
+        if let Some(binding) = resolve(name, source) {
+            let expr = binding
+                .all_expression()
+                .next()
+                .log_err("No expression in binding")?;
+            // TODO: check arity
+            let eval_params: Vec<_> = params.map(|p| p.eval(env, source, time)).collect();
+            let mut func_env = Env::empty();
+            for (arg, val) in binding
+                .all_identifier()
+                .skip(1)
+                .zip(eval_params.into_iter())
+            {
+                func_env.bind(
+                    arg.text().to_owned(),
+                    val.log_err("Argument could not be evaluated")?,
+                );
+            }
+            expr.duration(func_env.track(), source, time)
+        } else if env.resolve(name).is_some() {
+            Some(time)
+        } else {
+            match name {
+                "sin" | "loop" => Some(time),
+                "linear_adsr" => {
+                    let one_sec = Value(env.rate() as f64);
+                    let hundred_percent = Value(1.0);
+                    let params = [
+                        params
+                            .next()
+                            .log_err("linear_adsr: expected attack_duration")?
+                            .eval(env, source, time)
+                            .unwrap_or(one_sec),
+                        params
+                            .next()
+                            .log_err("linear_adsr: expected attack_value")?
+                            .eval(env, source, time)
+                            .unwrap_or(hundred_percent),
+                        params
+                            .next()
+                            .log_err("linear_adsr: expected delay_duration")?
+                            .eval(env, source, time)
+                            .unwrap_or(one_sec),
+                        params
+                            .next()
+                            .log_err("linear_adsr: expected delay_value")?
+                            .eval(env, source, time)
+                            .unwrap_or(hundred_percent),
+                        params
+                            .next()
+                            .log_err("linear_adsr: expected sustain_duration")?
+                            .eval(env, source, time)
+                            .unwrap_or(one_sec),
+                        params
+                            .next()
+                            .log_err("linear_adsr: expected sustain_value")?
+                            .eval(env, source, time)
+                            .unwrap_or(hundred_percent),
+                        params
+                            .next()
+                            .log_err("linear_adsr: expected release_duration")?
+                            .eval(env, source, time)
+                            .unwrap_or(one_sec),
+                    ];
+                    let durations = &[params[0], params[2], params[4], params[6]];
+                    Some(durations.iter().fold(0, |acc, v| acc + v.0 as u64))
+                }
+                _ => {
+                    println!("Unknown function: {}", name);
+                    None
+                }
+            }
+        }
+    }
 }
 
 impl Stream for Expression {
@@ -232,6 +311,17 @@ impl Stream for Expression {
             ExprKind::Call(c) => c.eval(env, source, time).log_err("err: expr: call"),
             ExprKind::Constant(c) => c.eval(env, source, time).log_err("err: expr: constant"),
             ExprKind::Sequence(s) => s.eval(env, source, time).log_err("err: expr: seq"),
+        }
+    }
+
+    #[comemo::memoize]
+    fn duration(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<u64> {
+        match self.kind()? {
+            ExprKind::Mul(m) => m.duration(env, source, time).log_err("err: expr: mul"),
+            ExprKind::Sum(s) => s.duration(env, source, time).log_err("err: expr: sum"),
+            ExprKind::Call(c) => c.duration(env, source, time).log_err("err: expr: call"),
+            ExprKind::Constant(c) => c.duration(env, source, time).log_err("err: expr: constant"),
+            ExprKind::Sequence(s) => s.duration(env, source, time).log_err("err: expr: seq"),
         }
     }
 }
@@ -253,6 +343,23 @@ impl Stream for Mul {
             }
         }
     }
+
+    #[comemo::memoize]
+    fn duration(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<u64> {
+        let mut exprs = self.all_expression();
+        let left = exprs.next()?;
+        let right = exprs.next()?;
+        let dur_left = left.duration(env, source, time);
+        let dur_right = right.duration(env, source, time);
+        match (dur_left, dur_right) {
+            (Some(l), Some(r)) => Some(std::cmp::min(l, r)),
+            (Some(_), None) | (None, Some(_)) => None,
+            (None, None) => {
+                println!("End of product");
+                None
+            }
+        }
+    }
 }
 
 impl Stream for Sum {
@@ -265,6 +372,23 @@ impl Stream for Sum {
         let eval_right = right.eval(env, source, time);
         match (eval_left, eval_right) {
             (Some(l), Some(r)) => Some(l + r),
+            (Some(x), None) | (None, Some(x)) => Some(x),
+            (None, None) => {
+                println!("End of sum");
+                None
+            }
+        }
+    }
+
+    #[comemo::memoize]
+    fn duration(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<u64> {
+        let mut exprs = self.all_expression();
+        let left = exprs.next()?;
+        let right = exprs.next()?;
+        let dur_left = left.duration(env, source, time);
+        let dur_right = right.duration(env, source, time);
+        match (dur_left, dur_right) {
+            (Some(l), Some(r)) => Some(std::cmp::max(l, r)),
             (Some(x), None) | (None, Some(x)) => Some(x),
             (None, None) => {
                 println!("End of sum");
@@ -314,13 +438,18 @@ impl Stream for Constant {
         };
         Some(Value(num / denom * unit))
     }
+
+    #[comemo::memoize]
+    fn duration(&self, _env: Tracked<Env>, _source: Tracked<Source>, time: u64) -> Option<u64> {
+        Some(time)
+    }
 }
 
 impl Stream for Sequence {
     #[comemo::memoize]
     fn eval(&self, env: Tracked<Env>, source: Tracked<Source>, mut time: u64) -> Option<Value> {
         for expr in self.all_expression() {
-            let dur = duration(time, expr.clone(), env, source);
+            let dur = expr.duration(env, source, time)?;
 
             if time <= dur {
                 match expr.eval(env, source, time) {
@@ -333,21 +462,11 @@ impl Stream for Sequence {
         }
         None
     }
-}
 
-#[comemo::memoize]
-fn duration(mut max: u64, expr: Expression, env: Tracked<Env>, source: Tracked<Source>) -> u64 {
-    let mut min = 0u64;
-    loop {
-        let half = min + ((max - min) / 2);
-        if expr.eval(env, source, half).is_none() {
-            max = half;
-        } else {
-            min = half;
-        }
-
-        if min.abs_diff(max) <= 1 {
-            return max;
-        }
+    #[comemo::memoize]
+    fn duration(&self, env: Tracked<Env>, source: Tracked<Source>, time: u64) -> Option<u64> {
+        self.all_expression()
+            .map(|e| e.duration(env, source, time))
+            .fold(Some(0), |acc, e| acc.and(e))
     }
 }
