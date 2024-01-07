@@ -14,7 +14,7 @@ fn main() {
     let source = resolve::Source::new(source);
     let main = resolve::resolve("main", source.track());
 
-    let (tx, rx) = std::sync::mpsc::sync_channel(24_000);
+    let (tx, rx) = std::sync::mpsc::sync_channel(24_000 * 5);
 
     let host = cpal::default_host();
     let device = host
@@ -28,6 +28,31 @@ fn main() {
         .expect("no supported config?!");
 
     let config = config_range.with_sample_rate(cpal::SampleRate(24_000));
+
+    match main {
+        Some(main) => {
+            dbg!(&main);
+            let expr = main.all_expression().next().unwrap();
+            let env = Env::empty();
+            let mut time = 0;
+            loop {
+                match expr.eval(env.track(), source.track(), time) {
+                    Some(v) => {
+                        // dbg!(v.0);
+                        if tx.try_send(v.0).is_err() {
+                            break;
+                        }
+                        time += 1;
+                    }
+                    None => {
+                        println!("Done");
+                        break;
+                    }
+                }
+            }
+        }
+        None => println!("Error: please provide a main node"),
+    }
 
     let sample_format = config.sample_format();
     let print_err = move |err| println!("{}", err);
@@ -61,30 +86,5 @@ fn main() {
 
     stream.play().unwrap();
 
-    match main {
-        Some(main) => {
-            dbg!(&main);
-            let expr = main.all_expression().next().unwrap();
-            let env = Env::empty();
-            let mut time = 0;
-            loop {
-                match expr.eval(env.track(), source.track(), time) {
-                    Some(v) => {
-                        // dbg!(v.0);
-                        if tx.try_send(v.0).is_err() {
-                            break;
-                        }
-                        time += 1;
-                    }
-                    None => {
-                        println!("Done");
-                        break;
-                    }
-                }
-            }
-        }
-        None => println!("Error: please provide a main node"),
-    }
-
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    std::thread::sleep(std::time::Duration::from_secs(5));
 }
